@@ -1,37 +1,53 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
 
-	// Uncomment the code below to pass the first stage
-	//
 	l, err := net.Listen("tcp", "0.0.0.0:6379")
 	if err != nil {
 		fmt.Println("Failed to bind to port 6379")
 		os.Exit(1)
 	}
 
-	conn, err := l.Accept()
-	if err != nil {
-		fmt.Println("Error accepting connection: ", err.Error())
-		os.Exit(1)
-	}
+	// hold the main thread until os signal
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	buf := make([]byte, 1024)
-	for {
-		_, err := conn.Read(buf)
-		if err != nil {
-			fmt.Println("Connection closed")
-			break
+	go func() {
+
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				fmt.Println("Error accepting connection: ", err.Error())
+				os.Exit(1)
+			}
+
+			go handleClient(conn)
 		}
-		conn.Write([]byte("+PONG\r\n"))
-	}
+	}()
 
+	<-ctx.Done()
+}
+
+func handleClient(conn net.Conn) error {
+	buf := make([]byte, 1024)
+	_, err := conn.Read(buf)
+	if err != nil {
+		fmt.Println("Connection closed")
+	}
+	_, err = conn.Write([]byte("+PONG\r\n"))
+	if err != nil {
+		return err
+	}
+	return nil
 }
