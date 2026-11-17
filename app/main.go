@@ -60,7 +60,6 @@ func handleClient(conn net.Conn) {
 			if err != nil {
 				fmt.Println("Error writing PONG")
 			}
-			return
 		}
 
 		if cmd == "echo" {
@@ -69,7 +68,6 @@ func handleClient(conn net.Conn) {
 			if err != nil {
 				fmt.Println("Not able to echo the msg")
 			}
-			return
 		}
 
 	}
