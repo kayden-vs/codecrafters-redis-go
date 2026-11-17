@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -45,14 +46,52 @@ func handleClient(conn net.Conn) {
 
 	buf := make([]byte, 1024)
 	for {
-		_, err := conn.Read(buf)
+		n, err := conn.Read(buf)
 		if err != nil {
 			fmt.Println("Connection closed")
 			return
 		}
+
+		cmd, arg := respToString(string(buf[:n]))
+		// fmt.Println(cmd, arg)
+		if cmd == "echo" {
+			msg := fmt.Sprintf("$%d\r\n%s\r\n", len(arg), arg)
+			_, err := conn.Write([]byte(msg))
+			if err != nil {
+				fmt.Println("Not able to echo the msg")
+			}
+			return
+		}
+
 		_, err = conn.Write([]byte("+PONG\r\n"))
 		if err != nil {
 			return
 		}
 	}
 }
+
+func respToString(resp string) (string, string) {
+	// *2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n
+	// 4\r\nECHO\r\n
+	indi := strings.Split(resp, "$")
+
+	var words []string
+	// if indi[0][0] == '*' {
+	// 	n := int(indi[0][1] - '0')
+	// }
+	indi = indi[1:]
+
+	for _, part := range indi {
+		var charBuf []byte
+		for i := 3; i < len(part)-2; i++ {
+			charBuf = append(charBuf, part[i])
+		}
+		words = append(words, string(charBuf))
+	}
+
+	return strings.ToLower(words[0]), words[1]
+}
+
+// func stringToResp(msg string) string {
+//
+// }
