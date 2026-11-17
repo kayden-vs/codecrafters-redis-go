@@ -37,17 +37,22 @@ func main() {
 	}()
 
 	<-ctx.Done()
+	l.Close()
 }
 
-func handleClient(conn net.Conn) error {
+func handleClient(conn net.Conn) {
+	defer conn.Close()
+
 	buf := make([]byte, 1024)
-	_, err := conn.Read(buf)
-	if err != nil {
-		fmt.Println("Connection closed")
+	for {
+		_, err := conn.Read(buf)
+		if err != nil {
+			fmt.Println("Connection closed")
+			return
+		}
+		_, err = conn.Write([]byte("+PONG\r\n"))
+		if err != nil {
+			return
+		}
 	}
-	_, err = conn.Write([]byte("+PONG\r\n"))
-	if err != nil {
-		return err
-	}
-	return nil
 }
