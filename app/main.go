@@ -53,7 +53,16 @@ func handleClient(conn net.Conn) {
 		}
 
 		cmd, arg := respToString(string(buf[:n]))
-		// fmt.Println(cmd, arg)
+		fmt.Println(cmd, arg)
+
+		if cmd == "ping" {
+			_, err = conn.Write([]byte("+PONG\r\n"))
+			if err != nil {
+				fmt.Println("Error writing PONG")
+			}
+			return
+		}
+
 		if cmd == "echo" {
 			msg := fmt.Sprintf("$%d\r\n%s\r\n", len(arg), arg)
 			_, err := conn.Write([]byte(msg))
@@ -63,33 +72,53 @@ func handleClient(conn net.Conn) {
 			return
 		}
 
-		_, err = conn.Write([]byte("+PONG\r\n"))
-		if err != nil {
-			return
-		}
 	}
 }
 
 func respToString(resp string) (string, string) {
-	// *2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n
-	// 4\r\nECHO\r\n
-	indi := strings.Split(resp, "$")
-
-	var words []string
-	// if indi[0][0] == '*' {
-	// 	n := int(indi[0][1] - '0')
-	// }
-	indi = indi[1:]
-
-	for _, part := range indi {
-		var charBuf []byte
-		for i := 3; i < len(part)-2; i++ {
-			charBuf = append(charBuf, part[i])
-		}
-		words = append(words, string(charBuf))
+	if len(resp) == 0 {
+		return "", ""
 	}
 
-	return strings.ToLower(words[0]), words[1]
+	// Single bulk string command: $4\r\nPING\r\n
+	if resp[0] == '$' {
+		lines := strings.Split(resp, "\r\n")
+		if len(lines) >= 2 {
+			return strings.ToLower(lines[1]), ""
+		}
+		return "", ""
+	}
+
+	// Standard RESP array: *1\r\n$4\r\nPING\r\n or *2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n
+	if resp[0] == '*' {
+		indi := strings.Split(resp, "$")[1:]
+		var words []string
+
+		for _, part := range indi {
+			lines := strings.Split(part, "\r\n")
+			if len(lines) >= 2 {
+				words = append(words, lines[1])
+			}
+		}
+
+		if len(words) == 0 {
+			return "", ""
+		}
+		if len(words) == 1 {
+			return strings.ToLower(words[0]), ""
+		}
+		return strings.ToLower(words[0]), strings.Join(words[1:], " ")
+	}
+
+	// Inline command fallback (e.g., "PING\r\n")
+	parts := strings.Fields(resp)
+	if len(parts) == 0 {
+		return "", ""
+	}
+	if len(parts) == 1 {
+		return strings.ToLower(parts[0]), ""
+	}
+	return strings.ToLower(parts[0]), strings.Join(parts[1:], " ")
 }
 
 // func stringToResp(msg string) string {
