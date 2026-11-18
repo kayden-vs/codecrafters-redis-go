@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -41,84 +43,84 @@ func main() {
 	l.Close()
 }
 
-func handleClient(conn net.Conn) {
-	defer conn.Close()
+func handleClient(connection net.Conn) {
+	defer connection.Close()
 
-	buf := make([]byte, 1024)
+	db := make(map[string]string)
+	var buffer [128]byte
 	for {
-		n, err := conn.Read(buf)
-		if err != nil {
-			fmt.Println("Connection closed")
-			return
+		n, err := connection.Read(buffer[:])
+		if err == io.EOF {
+			break
 		}
 
-		cmd, arg := respToString(string(buf[:n]))
-		fmt.Println(cmd, arg)
+		command := decodeBulkStringArray(buffer[:n])
 
-		if cmd == "ping" {
-			_, err = conn.Write([]byte("+PONG\r\n"))
-			if err != nil {
-				fmt.Println("Error writing PONG")
-			}
+		if command == nil {
+			continue
 		}
 
-		if cmd == "echo" {
-			msg := fmt.Sprintf("$%d\r\n%s\r\n", len(arg), arg)
-			_, err := conn.Write([]byte(msg))
-			if err != nil {
-				fmt.Println("Not able to echo the msg")
-			}
+		switch strings.ToLower(command[0]) {
+		case "ping":
+			connection.Write(encodeSimpleString("PONG"))
+		case "echo":
+			connection.Write(encodeBulkString(command[1]))
+		case "set":
+			db[command[1]] = command[2]
+			connection.Write(encodeSimpleString("OK"))
+		case "get":
+			connection.Write(encodeBulkString(db[command[1]]))
 		}
-
 	}
 }
 
-func respToString(resp string) (string, string) {
-	if len(resp) == 0 {
-		return "", ""
+func decodeBulkStringArray(data []byte) []string {
+	if len(data) == 0 {
+		return nil
 	}
 
-	// Single bulk string command: $4\r\nPING\r\n
-	if resp[0] == '$' {
-		lines := strings.Split(resp, "\r\n")
-		if len(lines) >= 2 {
-			return strings.ToLower(lines[1]), ""
-		}
-		return "", ""
+	if data[0] != '*' {
+		log.Fatal("Failed to decode bulk string array")
 	}
 
-	// Standard RESP array: *1\r\n$4\r\nPING\r\n or *2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n
-	if resp[0] == '*' {
-		indi := strings.Split(resp, "$")[1:]
-		var words []string
+	var lines []string
 
-		for _, part := range indi {
-			lines := strings.Split(part, "\r\n")
-			if len(lines) >= 2 {
-				words = append(words, lines[1])
-			}
-		}
+	_, n := getLine(data)
 
-		if len(words) == 0 {
-			return "", ""
-		}
-		if len(words) == 1 {
-			return strings.ToLower(words[0]), ""
-		}
-		return strings.ToLower(words[0]), strings.Join(words[1:], " ")
+	for n < len(data) {
+		line, length := decodeBulkString(data[n:])
+		lines = append(lines, line)
+		n += length
 	}
 
-	// Inline command fallback (e.g., "PING\r\n")
-	parts := strings.Fields(resp)
-	if len(parts) == 0 {
-		return "", ""
-	}
-	if len(parts) == 1 {
-		return strings.ToLower(parts[0]), ""
-	}
-	return strings.ToLower(parts[0]), strings.Join(parts[1:], " ")
+	return lines
 }
 
-// func stringToResp(msg string) string {
-//
-// }
+func decodeBulkString(data []byte) (string, int) {
+	if data[0] != '$' {
+		log.Fatal("Failed to decode bulk string")
+	}
+
+	_, start := getLine(data)
+	line, length := getLine(data[start:])
+
+	return string(line), start + length
+}
+
+func getLine(data []byte) ([]byte, int) {
+	i := 0
+
+	for data[i] != '\r' || data[i+1] != '\n' {
+		i++
+	}
+
+	return data[:i], i + 2
+}
+
+func encodeSimpleString(str string) []byte {
+	return []byte(fmt.Sprintf("+%s\r\n", str))
+}
+
+func encodeBulkString(str string) []byte {
+	return []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(str), str))
+}
